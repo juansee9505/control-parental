@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>Control Parental</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Control" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Pantalla de conexion -->
+    <section id="connect-screen" class="screen">
+      <div class="card">
+        <div class="logo">🛡️</div>
+        <h1>Control Parental</h1>
+        <p class="sub">Ingresa el mismo <b>código de familia</b> que pusiste en el PC.</p>
+
+        <label>Código de familia</label>
+        <input id="room" type="text" inputmode="latin" autocapitalize="characters"
+               placeholder="EJ: FAMILIA123" maxlength="20" />
+
+        <label>Nombre (opcional)</label>
+        <input id="parentName" type="text" placeholder="Papá / Mamá" maxlength="20" />
+
+        <button id="btn-connect" class="primary">Conectar</button>
+        <p id="connect-error" class="error"></p>
+      </div>
+      <p class="hint">El código se guarda en este teléfono para la próxima vez.</p>
+    </section>
+
+    <!-- Pantalla principal -->
+    <section id="main-screen" class="screen hidden">
+      <header>
+        <div class="status">
+          <span id="dot" class="dot offline"></span>
+          <span id="status-text">PC desconectado</span>
+        </div>
+        <button id="btn-disconnect" class="ghost">Salir</button>
+      </header>
+
+      <div class="screen-view">
+        <img id="screenshot" alt="Pantalla del PC" />
+        <div id="screen-placeholder" class="placeholder">
+          <span>Toca <b>Ver pantalla</b> para capturar lo que ve tu hijo</span>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="btn-view" class="action">📷<span>Ver pantalla</span></button>
+        <button id="btn-live" class="action">🔴<span>En vivo</span></button>
+        <button id="btn-message" class="action">💬<span>Mensaje</span></button>
+        <button id="btn-lock" class="action warn">🔒<span>Bloquear</span></button>
+        <button id="btn-shutdown" class="action danger">⏻<span>Apagar</span></button>
+      </div>
+
+      <p id="toast" class="toast hidden"></p>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

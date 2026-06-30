@@ -1,0 +1,15 @@
+# Configuracion para desplegar GRATIS en Render.com
+# Sube esta carpeta "server" a un repositorio de GitHub y en Render
+# elige "Blueprint" apuntando a este archivo.
+services:
+  - type: web
+    name: control-parental
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      # Token de seguridad opcional. Pon el MISMO valor en el agente y en
+      # la PWA (deja vacio para no usarlo). Genera uno largo y secreto.
+      - key: SHARED_TOKEN
+        sync: false

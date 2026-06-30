@@ -1,0 +1,17 @@
+{
+  "name": "control-parental-server",
+  "version": "1.0.0",
+  "description": "Servidor relay para control parental (PC Windows <-> PWA del padre)",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  }
+}
