@@ -1,7 +1,7 @@
 {
-  "name": "Control Parental",
-  "short_name": "Control",
-  "description": "Supervisa y controla el PC de tu hijo desde el celular",
+  "name": "h2Olga",
+  "short_name": "h2Olga",
+  "description": "h2Olga",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

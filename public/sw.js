@@ -1,6 +1,6 @@
 /* Service worker minimo: permite "instalar" la PWA en iPhone/Android.
    Cachea el cascaron de la app para que abra rapido. */
-const CACHE = 'control-parental-v1';
+const CACHE = 'h2olga-v2';
 const ASSETS = [
   './',
   './index.html',
