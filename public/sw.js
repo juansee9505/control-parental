@@ -1,6 +1,7 @@
 /* Service worker minimo: permite "instalar" la PWA en iPhone/Android.
-   Cachea el cascaron de la app para que abra rapido. */
-const CACHE = 'h2olga-v2';
+   Usa primero la red (para recibir siempre la ultima version) y la cache
+   solo si no hay conexion. */
+const CACHE = 'h2olga-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -23,9 +24,17 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  // Nunca cachear websockets ni APIs; solo archivos estaticos del mismo origen
-  if (e.request.method !== 'GET') return;
+  // Solo archivos estaticos del mismo origen (nada de websockets ni /health)
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname === '/health') return;
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request))
+    fetch(e.request)
+      .then((res) => {
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });

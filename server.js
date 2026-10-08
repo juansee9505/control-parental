@@ -17,21 +17,76 @@
 
 const http = require('http');
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 8080;
 
-// Token compartido opcional (capa extra de seguridad). Se define como
-// variable de entorno en el hosting. Si no se define, se omite la validacion.
+// Token compartido (capa extra de seguridad). Se define como variable de
+// entorno en el hosting y se pone el MISMO valor en el agente y en la PWA.
+// Si no se define, cualquiera que adivine el codigo de familia tiene acceso.
 const SHARED_TOKEN = process.env.SHARED_TOKEN || '';
+if (!SHARED_TOKEN) {
+  console.warn('AVISO: SHARED_TOKEN no esta definido. El codigo de familia es la unica proteccion.');
+}
+
+const MIN_ROOM_LENGTH = 4;
+const MAX_ROOM_LENGTH = 32;
+const MAX_NAME_LENGTH = 40;
+const MAX_PAYLOAD = 10 * 1024 * 1024; // 10 MB: suficiente para una captura JPEG
+const ALLOWED_ACTIONS = new Set(['screenshot', 'shutdown', 'message', 'lock']);
+
+// Limite de intentos de registro por IP (evita probar codigos a fuerza bruta)
+const REGISTER_WINDOW_MS = 60 * 1000;
+const MAX_REGISTERS_PER_WINDOW = 10;
+const registerAttempts = new Map(); // ip -> { count, resetAt }
+
+function tooManyAttempts(ip) {
+  const now = Date.now();
+  let entry = registerAttempts.get(ip);
+  if (!entry || entry.resetAt <= now) {
+    entry = { count: 0, resetAt: now + REGISTER_WINDOW_MS };
+    registerAttempts.set(ip, entry);
+  }
+  entry.count++;
+  return entry.count > MAX_REGISTERS_PER_WINDOW;
+}
+
+function tokenMatches(token) {
+  if (!SHARED_TOKEN) return true;
+  if (typeof token !== 'string') return false;
+  const a = crypto.createHash('sha256').update(token).digest();
+  const b = crypto.createHash('sha256').update(SHARED_TOKEN).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+function clientIp(req) {
+  // Render (y casi todos los hostings) ponen la IP real en X-Forwarded-For
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd) return fwd.split(',')[0].trim();
+  return req.socket.remoteAddress || '';
+}
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({
+  server,
+  maxPayload: MAX_PAYLOAD,
+  // Los navegadores siempre mandan Origin: solo se acepta el de esta misma
+  // pagina. El agente (programa de escritorio) normalmente no lo manda.
+  verifyClient: ({ origin, req }) => {
+    if (!origin) return true;
+    try {
+      return new URL(origin).host === req.headers.host;
+    } catch {
+      return false;
+    }
+  },
+});
 
 /**
  * rooms = {
@@ -65,10 +120,31 @@ function notifyPresence(room) {
   });
 }
 
-wss.on('connection', (ws) => {
+// Saca un socket de la sala en la que este (al cerrarse o al re-registrarse)
+function leaveRoom(ws) {
+  if (!ws.room) return;
+  const room = rooms.get(ws.room);
+  if (room) {
+    if (ws.role === 'agent' && room.agent === ws) {
+      room.agent = null;
+      room.agentName = '';
+      notifyPresence(room);
+    } else if (ws.role === 'parent') {
+      room.parents.delete(ws);
+    }
+    if (!room.agent && room.parents.size === 0) {
+      rooms.delete(ws.room);
+    }
+  }
+  ws.room = null;
+  ws.role = null;
+}
+
+wss.on('connection', (ws, req) => {
   ws.role = null;
   ws.room = null;
   ws.isAlive = true;
+  ws.ip = clientIp(req);
 
   ws.on('pong', () => { ws.isAlive = true; });
 
@@ -79,19 +155,33 @@ wss.on('connection', (ws) => {
     } catch {
       return; // ignorar basura
     }
+    if (!msg || typeof msg !== 'object') return;
 
     // --- Registro / emparejamiento ---
     if (msg.type === 'register') {
-      if (SHARED_TOKEN && msg.token !== SHARED_TOKEN) {
-        send(ws, { type: 'error', message: 'Token invalido' });
+      if (tooManyAttempts(ws.ip)) {
+        send(ws, { type: 'error', code: 'rate_limited', message: 'Demasiados intentos, espera un minuto' });
+        ws.close();
+        return;
+      }
+      if (!tokenMatches(msg.token)) {
+        send(ws, { type: 'error', code: 'bad_token', message: 'Token invalido' });
         ws.close();
         return;
       }
       const code = String(msg.room || '').trim().toUpperCase();
-      if (!code) {
-        send(ws, { type: 'error', message: 'Falta el codigo de familia' });
+      if (code.length < MIN_ROOM_LENGTH || code.length > MAX_ROOM_LENGTH) {
+        send(ws, {
+          type: 'error',
+          code: 'bad_room',
+          message: `El codigo de familia debe tener entre ${MIN_ROOM_LENGTH} y ${MAX_ROOM_LENGTH} caracteres`,
+        });
         return;
       }
+
+      // Si ya estaba registrado (en esta u otra sala), salir primero
+      leaveRoom(ws);
+
       const room = getRoom(code);
       ws.room = code;
       ws.role = msg.role === 'agent' ? 'agent' : 'parent';
@@ -99,17 +189,24 @@ wss.on('connection', (ws) => {
       if (ws.role === 'agent') {
         // Solo un agente por sala. Si llega otro, reemplaza al anterior.
         if (room.agent && room.agent !== ws) {
-          send(room.agent, { type: 'error', message: 'Reemplazado por otra sesion' });
-          try { room.agent.close(); } catch {}
+          const old = room.agent;
+          send(old, { type: 'error', code: 'replaced', message: 'Reemplazado por otra sesion' });
+          old.room = null; // evita que su "close" toque la sala
+          old.role = null;
+          try { old.close(); } catch {}
         }
         room.agent = ws;
-        room.agentName = msg.name || 'PC';
+        room.agentName = typeof msg.name === 'string' && msg.name.trim()
+          ? msg.name.trim().slice(0, MAX_NAME_LENGTH)
+          : 'PC';
         send(ws, { type: 'registered', role: 'agent', room: code });
+        notifyPresence(room);
       } else {
         room.parents.add(ws);
         send(ws, { type: 'registered', role: 'parent', room: code });
+        // Solo a este padre: los demas ya conocen el estado
+        send(ws, { type: 'presence', agentOnline: !!room.agent, agentName: room.agentName });
       }
-      notifyPresence(room);
       return;
     }
 
@@ -119,12 +216,15 @@ wss.on('connection', (ws) => {
 
     // --- Reenvio de mensajes ---
     if (ws.role === 'parent') {
-      // El padre envia comandos -> al agente
+      // El padre envia comandos -> al agente (solo acciones conocidas)
       if (msg.type === 'command') {
-        if (!room.agent) {
+        if (!ALLOWED_ACTIONS.has(msg.action)) {
+          send(ws, { type: 'error', message: 'Accion no permitida' });
+        } else if (!room.agent) {
           send(ws, { type: 'error', message: 'El PC no esta conectado' });
         } else {
-          send(room.agent, msg);
+          const payload = msg.payload && typeof msg.payload === 'object' ? msg.payload : {};
+          send(room.agent, { type: 'command', action: msg.action, payload });
         }
       }
     } else if (ws.role === 'agent') {
@@ -135,22 +235,8 @@ wss.on('connection', (ws) => {
     }
   });
 
-  ws.on('close', () => {
-    if (!ws.room) return;
-    const room = rooms.get(ws.room);
-    if (!room) return;
-    if (ws.role === 'agent' && room.agent === ws) {
-      room.agent = null;
-      room.agentName = '';
-      notifyPresence(room);
-    } else if (ws.role === 'parent') {
-      room.parents.delete(ws);
-    }
-    // Limpiar salas vacias
-    if (!room.agent && room.parents.size === 0) {
-      rooms.delete(ws.room);
-    }
-  });
+  ws.on('close', () => leaveRoom(ws));
+  ws.on('error', () => {});
 });
 
 // Keep-alive: cierra conexiones muertas (importante en hostings gratis)
@@ -160,6 +246,11 @@ const interval = setInterval(() => {
     ws.isAlive = false;
     try { ws.ping(); } catch {}
   });
+  // Limpiar contadores de intentos vencidos
+  const now = Date.now();
+  for (const [ip, entry] of registerAttempts) {
+    if (entry.resetAt <= now) registerAttempts.delete(ip);
+  }
 }, 30000);
 
 wss.on('close', () => clearInterval(interval));

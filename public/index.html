@@ -26,10 +26,13 @@
 
         <label>Código de familia</label>
         <input id="room" type="text" inputmode="latin" autocapitalize="characters"
-               placeholder="EJ: FAMILIA123" maxlength="20" />
+               placeholder="EJ: FAMILIA123" maxlength="32" />
 
         <label>Nombre (opcional)</label>
         <input id="parentName" type="text" placeholder="Papá / Mamá" maxlength="20" />
+
+        <label>Token de seguridad (si lo configuraste)</label>
+        <input id="token" type="password" autocomplete="off" placeholder="El mismo que en el servidor y el PC" />
 
         <button id="btn-connect" class="primary">Conectar</button>
         <p id="connect-error" class="error"></p>
@@ -61,9 +64,10 @@
         <button id="btn-lock" class="action warn">🔒<span>Bloquear</span></button>
         <button id="btn-shutdown" class="action danger">⏻<span>Apagar</span></button>
       </div>
-
-      <p id="toast" class="toast hidden"></p>
     </section>
+
+    <!-- Fuera de las pantallas para que se vea tambien en la de conexion -->
+    <p id="toast" class="toast hidden"></p>
   </div>
 
   <script src="app.js"></script>
